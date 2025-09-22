@@ -181,7 +181,7 @@ func (r *Runner) handleJobEvent(event notify.EventInfo) {
 		}
 
 		// log the full event
-		log.Debugf("received job event: %v", prettyJson(ansibleEvent))
+		log.Debugf("received job event: %v", prettyJson(data))
 
 		eventData, ok := ansibleEvent["event_data"]
 		if !ok {
@@ -230,7 +230,7 @@ func (r *Runner) handleJobEvent(event notify.EventInfo) {
 		}
 
 		r.Events <- filteredModifiedData
-		log.Debugf("event sent: event=%v", prettyJson(filteredEvent.(map[string]any)))
+		log.Debugf("event sent: event=%v", prettyJson(filteredModifiedData))
 	}
 }
 
@@ -395,9 +395,15 @@ func (r *Runner) watch(
 	}
 }
 
-func prettyJson(jsonObject map[string]any) string {
+func prettyJson(jsonString string) string {
+	var jsonObject map[string]any
+	if err := json.Unmarshal(jsonString, &jsonObject); err != nil {
+		log.Errorf("cannot unmarshal JSON: err=%v", err)
+		return ""
+	}
 	pretty, err := json.MarshalIndent(jsonObject, "", "\t")
 	if err != nil {
+		log.Errorf("cannot marshal JSON: err=%v", err)
 		return fmt.Sprintf("%v", jsonObject)
 	}
 	return string(pretty)
