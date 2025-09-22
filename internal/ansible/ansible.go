@@ -36,20 +36,10 @@ type Runner struct {
 	stopJobEventsWatch  chan struct{}
 	stopStatusFileWatch chan struct{}
 	timeout             time.Duration
-
-	// The job event schema provided by Playbook Dispatcher.
-	// We use this to filter job events down to just what is required
-	// 	by PD so we don't transmit excessive amounts of data.
-	// Though unlikely, this COULD change, so it's an untyped map.
-	// We will want to fetch this from the server so it's up to date.
-	schema map[string]any
 }
 
 // NewRunner creates a new Runner, uniquely identified by ID.
 func NewRunner(ID string, timeout time.Duration) *Runner {
-
-	schema := getPlaybookDispatcherSchema(filepath.Join(
-		constants.LibDir, "rhc-worker-playbook", "ansibleRunnerJobEvent.yaml"))
 
 	return &Runner{
 		Events:              make(chan json.RawMessage),
@@ -58,7 +48,6 @@ func NewRunner(ID string, timeout time.Duration) *Runner {
 		stopJobEventsWatch:  make(chan struct{}),
 		stopStatusFileWatch: make(chan struct{}),
 		timeout:             timeout,
-		schema:              schema,
 	}
 }
 
@@ -220,15 +209,27 @@ func (r *Runner) handleJobEvent(event notify.EventInfo) {
 			ansibleEvent["end_line"] = 0
 		}
 
-		filteredEvent := filterEvent(ansibleEvent, r.schema)
+		// filteredEvent := filterEvent(ansibleEvent, ANSIBLE_RUNNER_JOB_EVENT_SCHEMA)
 
-		modifiedData, err := json.Marshal(filteredEvent)
+		fullModifiedData, err := json.Marshal(ansibleEvent)
 		if err != nil {
 			log.Errorf("cannot marshal JSON: err=%v", err)
 			return
 		}
 
-		r.Events <- modifiedData
+		// filter the event by narrowing to the playbook-dispatcher types
+		var filteredEvent PlaybookRunResponseMessageYamlEventsElem
+		if err := json.Unmarshal(b, &filteredEvent); err != nil {
+			return err
+		}
+
+		filteredModifiedData, err := json.Marshal(filteredEvent)
+		if err != nil {
+			log.Errorf("cannot marshal JSON: err=%v", err)
+			return
+		}
+
+		r.Events <- filteredModifiedData
 		log.Debugf("event sent: event=%v", prettyJson(filteredEvent))
 	}
 }
@@ -288,29 +289,6 @@ func filterEvent(event map[string]any, schema map[string]any) map[string]any {
 			//       -- filtered down to "playbook", "playbook_uuid", "host," etc.
 			filteredEvent[key] = filterEvent(
 				value.(map[string]any), propSchema.(map[string]any))
-		case "array":
-			// there are currently no array types in PBD, but here for completeness' sake
-
-			if reflect.ValueOf(value).Kind() == reflect.Slice {
-				itemType := reflect.TypeOf((value)).Elem().Kind()
-
-				// differentiate between maps and non-maps for type safety
-				if itemType == reflect.Map {
-					filteredArray := []map[string]any{}
-					for _, item := range value.([]map[string]any) {
-						filteredItem := filterArrayItem(item, propSchema)
-						filteredArray = append(filteredArray, filteredItem.(map[string]any))
-					}
-					filteredEvent[key] = filteredArray
-				} else {
-					filteredArray := []any{}
-					for _, item := range value.([]any) {
-						filteredItem := filterArrayItem(item, propSchema)
-						filteredArray = append(filteredArray, filteredItem)
-					}
-					filteredEvent[key] = filteredArray
-				}
-			}
 		default:
 			filteredEvent[key] = value
 		}
@@ -423,22 +401,4 @@ func prettyJson(jsonObject map[string]any) string {
 		return fmt.Sprintf("%v", jsonObject)
 	}
 	return string(pretty)
-}
-
-// getPlaybookDispatcherSchema loads the playbook dispatcher schema from file
-func getPlaybookDispatcherSchema(schemaFile string) map[string]any {
-	// TODO: download the schema, fall back to default
-	var playbookDispatcherSchema map[string]any
-
-	data, err := os.ReadFile(schemaFile)
-	if err != nil {
-		log.Errorf("cannot read file: file=%v error=%v", schemaFile, err)
-		return nil
-	}
-	if err = yaml.Unmarshal(data, &playbookDispatcherSchema); err != nil {
-		log.Errorf("cannot unmarshal API schema: %v", err)
-		return nil
-	}
-
-	return playbookDispatcherSchema
 }
