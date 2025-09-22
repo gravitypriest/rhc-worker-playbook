@@ -219,7 +219,8 @@ func (r *Runner) handleJobEvent(event notify.EventInfo) {
 		// filter the event by narrowing to the playbook-dispatcher types
 		var filteredEvent PlaybookRunResponseMessageYamlEventsElem
 		if err := json.Unmarshal(fullModifiedData, &filteredEvent); err != nil {
-			return err
+			log.Errorf("cannot unmarshal JSON: err=%v", err)
+			return
 		}
 
 		filteredModifiedData, err := json.Marshal(filteredEvent)
