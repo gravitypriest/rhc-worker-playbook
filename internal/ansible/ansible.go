@@ -230,7 +230,7 @@ func (r *Runner) handleJobEvent(event notify.EventInfo) {
 		}
 
 		r.Events <- filteredModifiedData
-		log.Debugf("event sent: event=%v", prettyJson(filteredEvent))
+		log.Debugf("event sent: event=%v", prettyJson(filteredEvent.(map[string]any)))
 	}
 }
 
@@ -395,7 +395,7 @@ func (r *Runner) watch(
 	}
 }
 
-func prettyJson(jsonObject PlaybookRunResponseMessageYamlEventsElem) string {
+func prettyJson(jsonObject map[string]any) string {
 	pretty, err := json.MarshalIndent(jsonObject, "", "\t")
 	if err != nil {
 		return fmt.Sprintf("%v", jsonObject)
