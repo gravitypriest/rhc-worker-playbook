@@ -208,9 +208,7 @@ func (r *Runner) handleJobEvent(event notify.EventInfo) {
 			ansibleEvent["end_line"] = 0
 		}
 
-		// filteredEvent := filterEvent(ansibleEvent, ANSIBLE_RUNNER_JOB_EVENT_SCHEMA)
-
-		fullModifiedData, err := json.Marshal(ansibleEvent)
+		modifiedData, err := json.Marshal(ansibleEvent)
 		if err != nil {
 			log.Errorf("cannot marshal JSON: err=%v", err)
 			return
@@ -218,7 +216,7 @@ func (r *Runner) handleJobEvent(event notify.EventInfo) {
 
 		// filter the event by narrowing to the playbook-dispatcher types
 		var filteredEvent PlaybookRunResponseMessageYamlEventsElem
-		if err := json.Unmarshal(fullModifiedData, &filteredEvent); err != nil {
+		if err := json.Unmarshal(modifiedData, &filteredEvent); err != nil {
 			log.Errorf("cannot unmarshal JSON: err=%v", err)
 			return
 		}
@@ -232,84 +230,6 @@ func (r *Runner) handleJobEvent(event notify.EventInfo) {
 		r.Events <- filteredModifiedData
 		log.Debugf("event sent: event=%v", prettyJson(filteredModifiedData))
 	}
-}
-
-// filterEvent filters an ansible job event `event` based on schema `schema`.
-//
-//	The function calls itself recursively to filter nested objects.
-//	All of this is loosely typed with map[string]any since we are dealing with
-//	job event JSON with nondeterministic properties.
-func filterEvent(event map[string]any, schema map[string]any) map[string]any {
-	properties, ok := schema["properties"]
-	if !ok {
-		// no properties to iterate over
-		return map[string]any{}
-	}
-
-	filteredEvent := map[string]any{}
-
-	for key, value := range event {
-		var propSchema any
-		if reflect.TypeOf(properties).Kind() == reflect.Map {
-			propSchema = properties.(map[string]any)[key]
-		}
-
-		if propSchema == nil {
-			// if propSchema is nil, it means the key doesn't exist in "properties"
-			// 	in the schema, so it's filtered out
-			continue
-		}
-		propType := propSchema.(map[string]any)["type"]
-
-		switch propType {
-		case "object":
-			// The schema may contain object types with nested properties, so recursively
-			//   filter the nested data (value) with the nested schema (prop_schema).
-			//
-			//   I.e., "event_data" will have nested data that needs to be filtered
-			//       down to the properties in the schema:
-			//
-			//   properties:
-			//       ...
-			//       event_data:
-			//           type: object
-			//           properties:
-			//               playbook:
-			//                   ...
-			//               playbook_uuid:
-			//                   ...
-			//               host:
-			//                   ...
-			//               ...
-			//       ...
-			//
-			//   Specifically speaking, filtered_event["event_data"] will be set to
-			//       event["event_data"], with the inner keys filtered based on
-			//       the properties of the provided "event_data" object schema
-			//       -- filtered down to "playbook", "playbook_uuid", "host," etc.
-			filteredEvent[key] = filterEvent(
-				value.(map[string]any), propSchema.(map[string]any))
-		default:
-			filteredEvent[key] = value
-		}
-	}
-
-	return filteredEvent
-}
-
-// helper function for filterEvent to handle different item types
-func filterArrayItem(item any, propSchema any) any {
-	propSchemaItems := propSchema.(map[string]any)["items"]
-	propSchemaItemsType := propSchemaItems.(map[string]any)["type"]
-
-	if propSchemaItemsType == "object" {
-		filteredItem := filterEvent(
-			item.(map[string]any), propSchemaItems.(map[string]any))
-		return filteredItem
-	} else {
-		return item
-	}
-
 }
 
 // handleStatusFileEvent is the handler function invoked when the status file is
