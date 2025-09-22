@@ -395,7 +395,7 @@ func (r *Runner) watch(
 	}
 }
 
-func prettyJson(jsonObject map[string]any) string {
+func prettyJson(jsonObject PlaybookRunResponseMessageYamlEventsElem) string {
 	pretty, err := json.MarshalIndent(jsonObject, "", "\t")
 	if err != nil {
 		return fmt.Sprintf("%v", jsonObject)
