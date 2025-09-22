@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"git.sr.ht/~spc/go-log"
-	"github.com/goccy/go-yaml"
 	"github.com/google/uuid"
 	"github.com/redhatinsights/rhc-worker-playbook/internal/constants"
 	"github.com/redhatinsights/rhc-worker-playbook/internal/exec"
@@ -219,7 +218,7 @@ func (r *Runner) handleJobEvent(event notify.EventInfo) {
 
 		// filter the event by narrowing to the playbook-dispatcher types
 		var filteredEvent PlaybookRunResponseMessageYamlEventsElem
-		if err := json.Unmarshal(b, &filteredEvent); err != nil {
+		if err := json.Unmarshal(fullModifiedData, &filteredEvent); err != nil {
 			return err
 		}
 
