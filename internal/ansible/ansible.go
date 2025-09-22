@@ -395,9 +395,9 @@ func (r *Runner) watch(
 	}
 }
 
-func prettyJson(jsonString string) string {
+func prettyJson(jsonBytes []byte) string {
 	var jsonObject map[string]any
-	if err := json.Unmarshal(jsonString, &jsonObject); err != nil {
+	if err := json.Unmarshal(jsonBytes, &jsonObject); err != nil {
 		log.Errorf("cannot unmarshal JSON: err=%v", err)
 		return ""
 	}
