@@ -15,6 +15,7 @@ setuptools.setup(
             "rhc-worker-playbook.worker = rhc_worker_playbook.server:serve"
         ]
     },
+    setup_requires=["wheel"],
     install_requires=[
         "ansible-runner",
         "grpcio==1.53.0",
