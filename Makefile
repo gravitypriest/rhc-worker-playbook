@@ -16,7 +16,6 @@ CONFIG_FILE	?= $(CONFIG_DIR)/rhc-worker-playbook.toml
 WORKER_LIB_DIR ?= $(LIBDIR)/$(PKGNAME)
 PYTHON_PKGDIR ?= $(shell /usr/libexec/platform-python -Ic "from distutils.sysconfig import get_python_lib; print(get_python_lib())")
 
-.PHONY: build
 build: rhc_worker_playbook/constants.py
 	$(PYTHON) setup.py build
 	$(PYTHON) -m pip wheel --wheel-dir=vendor --no-index --find-links vendor vendor/*.tar.gz
@@ -50,7 +49,6 @@ tarball: dist/$(PKGNAME)-$(PKGVER).tar.gz
 dist/$(PKGNAME)-$(PKGVER).tar.gz:
 	$(PYTHON) setup.py sdist
 
-.PHONY: rhc-worker-playbook.spec
 rhc-worker-playbook.spec: rhc-worker-playbook.spec.in
 	sed \
 		-e 's,[@]PKGVER[@],$(PKGVER),g' \
