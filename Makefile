@@ -40,8 +40,8 @@ uninstall:
 
 .PHONY: clean
 clean:
-	rm rhc_worker_playbook/constants.py
-	rm rhc-worker-playbook.spec
+	rm -f rhc_worker_playbook/constants.py
+	rm -f rhc-worker-playbook.spec
 
 .PHONY: tarball
 tarball: dist/$(PKGNAME)-$(PKGVER).tar.gz
