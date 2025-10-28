@@ -29,7 +29,13 @@ setuptools.setup(
         "grpcio==1.53.0",
         "grpcio-tools==1.53.0",
         "protobuf==4.21.6",
-        "toml",
     ],
+    extras_require={
+        "dev": [
+            "requests",
+            "toml",
+            "pyyaml",
+        ]
+    },
     zip_safe=False,
 )
