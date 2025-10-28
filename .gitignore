@@ -5,6 +5,7 @@ lib64
 include
 pip-selfcheck.json
 build
+wheel
 dist
 libexec
 rhc_ansible_worker/contrib
