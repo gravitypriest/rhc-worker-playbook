@@ -8,7 +8,6 @@ from .constants import (
     RUNNER_ROTATE_ARTIFACTS,
 )
 
-sys.path.insert(0, WORKER_LIB_DIR)
 import toml
 import yaml
 import grpc
