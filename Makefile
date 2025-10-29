@@ -7,14 +7,13 @@ _LATEST_TAG = $(shell git describe --tags --abbrev=0 --always | tr -d '\n')
 _NUM_COMMITS_SINCE_LATEST_TAG = $(shell git rev-list $(_LATEST_TAG)..HEAD --count | tr -d '\n')
 RELEASE = $(shell printf "99.%s.git.%s" $(_NUM_COMMITS_SINCE_LATEST_TAG) $(_SHORT_COMMIT))
 
-PREFIX		?= /usr/local
+DESTDIR		?= /
+PREFIX		?= $(DESTDIR)usr/local
 LIBDIR		?= $(PREFIX)/lib
 LIBEXECDIR	?= $(PREFIX)/libexec
 SYSCONFDIR	?= $(PREFIX)/etc
-CONFIG_DIR	?= $(SYSCONFDIR)/rhc/workers
-CONFIG_FILE	?= $(CONFIG_DIR)/rhc-worker-playbook.toml
+CONFIG_FILE	?= $(SYSCONFDIR)/rhc/workers/rhc-worker-playbook.toml
 WORKER_LIB_DIR ?= $(LIBDIR)/$(PKGNAME)
-PYTHON_PKGDIR ?= $(shell /usr/libexec/platform-python -Ic "from distutils.sysconfig import get_python_lib; print(get_python_lib())")
 
 build: rhc_worker_playbook/constants.py
 	$(PYTHON) setup.py sdist
@@ -31,11 +30,10 @@ install:
 	for wheel in $(shell ls wheel/ansible*) $(shell ls wheel/grpcio*) $(shell ls wheel/protobuf*) ; do \
 		$(PYTHON) -m pip install $$wheel --no-index --find-links wheel --target $(LIBDIR)/$(PKGNAME) ;\
 	done
-	$(PYTHON) -m pip install $(shell ls wheel/rhc_worker_playbook*) --no-deps --prefix=$(PREFIX)
-	mkdir -p $(LIBEXECDIR)/rhc/workers
-	mv $(PREFIX)/bin/rhc-worker-playbook.worker $(LIBEXECDIR)/rhc/workers/rhc-worker-playbook.worker
-
-	[[ -e $(DESTDIR)$(CONFIG_FILE) ]] || install -D -m644 ./rhc-worker-playbook.toml $(DESTDIR)$(CONFIG_FILE)
+	$(PYTHON) -m pip install $(shell ls wheel/rhc_worker_playbook*) --no-index --no-deps --prefix=$(PREFIX)
+	install -Dm 755 $(PREFIX)/bin/rhc-worker-playbook.worker $(LIBEXECDIR)/rhc/workers/rhc-worker-playbook.worker
+	rm -rf $(PREFIX)/bin/rhc-worker-playbook.worker
+	[[ -e $(CONFIG_FILE) ]] || install -Dm 644 ./rhc-worker-playbook.toml $(CONFIG_FILE)
 
 .PHONY: uninstall
 uninstall:
