@@ -18,7 +18,7 @@ PYTHON_PKGDIR ?= $(shell /usr/libexec/platform-python -Ic "from distutils.syscon
 
 build: rhc_worker_playbook/constants.py
 	$(PYTHON) setup.py sdist
-	$(PYTHON) -m pip wheel --wheel-dir=wheel .
+	$(PYTHON) -m pip wheel -c constraints.txt --wheel-dir=wheel .
 
 rhc_worker_playbook/constants.py: rhc_worker_playbook/constants.py.in
 	sed \

@@ -1,0 +1,2 @@
+# there are deprecations above this constraint
+setuptools<81
