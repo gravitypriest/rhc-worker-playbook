@@ -42,7 +42,7 @@ uninstall:
 	rm -rf $(LIBEXECDIR)/rhc/$(PKGNAME).worker
 	rm -rf $(LIBDIR)/python*/site-packages/$(PKGNAME)*
 	rm -rf $(LIBDIR)/$(PKGNAME)
-	pip uninstall rhc-worker-playbook
+	$(PYTHON) -m pip -y uninstall rhc-worker-playbook
 	rm -f $(LIBEXECDIR)/rhc/workers/rhc-worker-playbook.worker
 
 
