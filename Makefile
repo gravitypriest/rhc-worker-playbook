@@ -50,6 +50,7 @@ uninstall:
 clean:
 	rm -f rhc_worker_playbook/constants.py
 	rm -f rhc-worker-playbook.spec
+	rm -rf wheel
 
 rhc-worker-playbook.spec: rhc-worker-playbook.spec.in
 	sed \
