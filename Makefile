@@ -31,7 +31,7 @@ install:
 	for wheel in $(shell ls wheel/ansible*) $(shell ls wheel/grpcio*) $(shell ls wheel/protobuf*) ; do \
 		$(PYTHON) -m pip install $$wheel --no-index --find-links wheel --target $(LIBDIR)/$(PKGNAME) ;\
 	done
-	$(PYTHON) -m pip install $(shell ls wheel/rhc_worker_playbook*) --no-deps --no-index --find-links wheel
+	$(PYTHON) -m pip install $(shell ls wheel/rhc_worker_playbook*) --no-deps --prefix=$(PREFIX)
 	mkdir -p $(LIBEXECDIR)/rhc/workers
 	mv $(PREFIX)/bin/rhc-worker-playbook.worker $(LIBEXECDIR)/rhc/workers/rhc-worker-playbook.worker
 

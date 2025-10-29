@@ -1,8 +1,0 @@
-#!/usr/libexec/platform-python
-import sys
-
-sys.dont_write_bytecode = True
-from rhc_worker_playbook import server
-
-if __name__ == "__main__":
-    server.serve()
