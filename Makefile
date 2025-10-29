@@ -28,8 +28,13 @@ rhc_worker_playbook/constants.py: rhc_worker_playbook/constants.py.in
 
 .PHONY: install
 install: 
-	$(PYTHON) setup.py install --root=$(DESTDIR) --prefix=$(PREFIX) --install-scripts=$(LIBEXECDIR)/rhc --single-version-externally-managed --record /dev/null
-	$(PYTHON) -m pip install --target $(DESTDIR)$(LIBDIR)/$(PKGNAME) --no-index --find-links vendor vendor/*.whl
+	for wheel in $(shell ls wheel/ansible*) $(shell ls wheel/grpcio*) $(shell ls wheel/protobuf*) ; do \
+		$(PYTHON) -m pip install $$wheel --no-index --find-links wheel --target $(LIBDIR)/$(PKGNAME) ;\
+	done
+	$(PYTHON) -m pip install $(shell ls wheel/rhc_worker_playbook*) --no-index --find-links wheel
+	mkdir -p $(LIBEXECDIR)/rhc/workers
+	mv $(PREFIX)/bin/rhc-worker-playbook.worker $(LIBEXECDIR)/rhc/workers/rhc-worker-playbook.worker
+
 	[[ -e $(DESTDIR)$(CONFIG_FILE) ]] || install -D -m644 ./rhc-worker-playbook.toml $(DESTDIR)$(CONFIG_FILE)
 
 .PHONY: uninstall
@@ -37,6 +42,9 @@ uninstall:
 	rm -rf $(LIBEXECDIR)/rhc/$(PKGNAME).worker
 	rm -rf $(LIBDIR)/python*/site-packages/$(PKGNAME)*
 	rm -rf $(LIBDIR)/$(PKGNAME)
+	pip uninstall rhc-worker-playbook
+	rm -f $(LIBEXECDIR)/rhc/workers/rhc-worker-playbook.worker
+
 
 .PHONY: clean
 clean:

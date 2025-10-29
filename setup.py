@@ -21,14 +21,6 @@ setuptools.setup(
         "grpcio==1.53.0",
         "grpcio-tools==1.53.0",
         "protobuf==4.21.6",
-        "toml",
-    ],
-    setup_requires=["wheel"],
-    install_requires=[
-        "ansible-runner",
-        "grpcio==1.53.0",
-        "grpcio-tools==1.53.0",
-        "protobuf==4.21.6",
     ],
     extras_require={
         "dev": [
