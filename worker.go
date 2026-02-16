@@ -8,7 +8,6 @@ import (
 	"io"
 	"mime/multipart"
 	"net/textproto"
-	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -18,10 +17,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/redhatinsights/rhc-worker-playbook/internal/ansible"
 	"github.com/redhatinsights/rhc-worker-playbook/internal/config"
-	"github.com/redhatinsights/rhc-worker-playbook/internal/constants"
 	"github.com/redhatinsights/yggdrasil/worker"
 	"github.com/subpop/go-log"
 )
+
+var playbookAlreadyRunning sync.Mutex
 
 type EventManager struct {
 	id                string
@@ -98,8 +98,8 @@ func rx(
 	// Create the event manager.
 	eventManager := NewEventManager(id, returnURL, responseInterval, w)
 
-	if _, err := os.Stat(constants.PlaybookInProgressMarker); !errors.Is(err, os.ErrNotExist) {
-		// .playbook-in-progess exists, playbook is currently in progress
+	if playbookAlreadyRunning.TryLock() == false {
+		// playbook is currently in progress
 		playbookAlreadyRunningErr := errors.New(
 			"a playbook run is already in progress, please wait until the current playbook finishes before executing another",
 		)
@@ -114,14 +114,7 @@ func rx(
 		return playbookAlreadyRunningErr
 	}
 
-	// create the .playbook-in-progress file to prevent other playbooks from running simultaneously
-	if _, err := os.Create(constants.PlaybookInProgressMarker); err != nil {
-		return fmt.Errorf(
-			"cannot create .playbook-in-progress file: file=%v err=%w",
-			constants.PlaybookInProgressMarker,
-			err,
-		)
-	}
+	defer playbookAlreadyRunning.Unlock()
 
 	if config.DefaultConfig.VerifyPlaybook {
 		d, err := verifyPlaybook(data)
@@ -173,15 +166,6 @@ func (e *EventManager) processEvents(runner *ansible.Runner) {
 	}
 
 	log.Infof("message finished: message-id=%v", e.id)
-
-	// delete the .playbook-in-progress file at the end of the run
-	if err := os.Remove(constants.PlaybookInProgressMarker); err != nil {
-		log.Errorf(
-			"cannot delete the .playbook-in-progress file: path=%v err=%v",
-			constants.PlaybookInProgressMarker,
-			err,
-		)
-	}
 }
 
 // transmitCachedEvents periodically transmits a batch of cached events when the
