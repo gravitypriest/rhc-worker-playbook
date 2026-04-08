@@ -323,25 +323,24 @@ func generateExecutorOnFailedEvent(
 	}
 }
 
-// sendExecutorOnStartEvent generates an executor_on_start event and places it on the Events channel
+// sendExecutorOnStartEvent generates an executor_on_start event and sends it on the Events channel
 func (e *EventManager) sendExecutorOnStartEvent() error {
-	startEvent := generateExecutorOnStartEvent(e.runner.ID, uuid.New)
-	startEventJsonString, err := json.Marshal(startEvent)
-	if err != nil {
-		return fmt.Errorf("cannot marshal json: err=%v", err)
-	}
-	e.runner.Events <- json.RawMessage(startEventJsonString)
-	return nil
+	event := generateExecutorOnStartEvent(e.runner.ID, uuid.New)
+	return e.sendExecutorEvent(event)
 }
 
-// sendExecutorOnFailedEvent generates an executor_on_failed event and places it on the Events channel
+// sendExecutorOnFailedEvent generates an executor_on_failed event and sends it on the Events channel
 func (e *EventManager) sendExecutorOnFailedEvent(errorKey string, errorDetails error) error {
 	event := generateExecutorOnFailedEvent(
 		e.runner.ID,
 		errorKey,
 		errorDetails,
 		uuid.New)
+	return e.sendExecutorEvent(event)
+}
 
+// sendExecutorEvent marshals an event and sends it on the Events channel
+func (e *EventManager) sendExecutorEvent(event map[string]any) error {
 	data, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("cannot marshal JSON: err=%w", err)
