@@ -96,48 +96,34 @@ func rx(
 	// Create the event manager.
 	eventManager := NewEventManager(id, returnURL, responseInterval, w)
 
+	// Create the playbook runner.
+	runner := ansible.NewRunner(correlationID)
+	defer close(runner.Events)
+
+	// Start the goroutine processing events from the runner.
+	go eventManager.processEvents(runner)
+	go eventManager.transmitCachedEvents()
+
+	// publish an "executor_on_start" event to signal cloud connector that a run
+	// event has started
+	if err := SendExecutorOnStartEvent(correlationID, runner); err != nil {
+		return err
+	}
+
 	if config.DefaultConfig.VerifyPlaybook {
 		d, err := verifyPlaybook(data)
 		if err != nil {
 			verifyPlaybookError := err
 
-			// If playbook verification fails, send the error back to insights
-			// An executor_on_start event is needed since this is prior to Runner initialization
-			startEvent := ansible.GenerateExecutorOnStartEvent(correlationID, uuid.New)
-			failureEvent := ansible.GenerateExecutorOnFailedEvent(
+			if err := SendExecutorOnFailedEvent(
 				correlationID,
 				"ANSIBLE_PLAYBOOK_SIGNATURE_VALIDATION_FAILED",
 				verifyPlaybookError,
-				uuid.New,
-			)
-
-			startEventJsonString, err := json.Marshal(startEvent)
-			// combine errors and return if JSON serialization fails
-			if err != nil {
+				runner,
+			); err != nil {
 				return errors.Join(
 					verifyPlaybookError,
-					fmt.Errorf("cannot marshal JSON: err=%w", err),
-				)
-			}
-
-			failureEventJsonString, err := json.Marshal(failureEvent)
-			// combine errors and return if JSON serialization fails
-			if err != nil {
-				return errors.Join(
-					verifyPlaybookError,
-					fmt.Errorf("cannot marshal JSON: err=%w", err),
-				)
-			}
-
-			if err := eventManager.transmitEvents(
-				[]json.RawMessage{
-					json.RawMessage(startEventJsonString),
-					json.RawMessage(failureEventJsonString),
-				}); err != nil {
-				// combine errors and return if transmit fails
-				return errors.Join(
-					verifyPlaybookError,
-					fmt.Errorf("cannot transmit events: err=%w", err),
+					err,
 				)
 			}
 
@@ -146,17 +132,25 @@ func rx(
 		data = d
 	}
 
-	// Create the playbook runner.
-	runner := ansible.NewRunner(correlationID)
-
-	// Start the goroutine processing events from the runner.
-	go eventManager.processEvents(runner)
-	go eventManager.transmitCachedEvents()
-
 	// Run the playbook.
 	err = runner.Run(data)
+
 	if err != nil {
-		return fmt.Errorf("cannot run playbook: err=%w", err)
+		playbookRunError := fmt.Errorf("cannot run playbook: err=%w", err)
+
+		if err := SendExecutorOnFailedEvent(
+			correlationID,
+			"UNDEFINED_ERROR",
+			playbookRunError,
+			runner,
+		); err != nil {
+			return errors.Join(
+				playbookRunError,
+				err,
+			)
+		}
+
+		return playbookRunError
 	}
 
 	return nil
@@ -283,6 +277,31 @@ func (e *EventManager) transmitEvents(events []json.RawMessage) error {
 		)
 	}
 
+	return nil
+}
+
+func SendExecutorOnStartEvent(correlationID string, runner *ansible.Runner) error {
+	startEvent := ansible.GenerateExecutorOnStartEvent(correlationID, uuid.New)
+	startEventJsonString, err := json.Marshal(startEvent)
+	if err != nil {
+		return fmt.Errorf("cannot marshal json: err=%v", err)
+	}
+	runner.Events <- json.RawMessage(startEventJsonString)
+	return nil
+}
+
+func SendExecutorOnFailedEvent(correlationID string, errorKey string, errorString error, runner *ansible.Runner) error {
+	event := ansible.GenerateExecutorOnFailedEvent(
+		correlationID,
+		errorKey,
+		errorString,
+		uuid.New)
+
+	data, err := json.Marshal(event)
+	if err != nil {
+		return fmt.Errorf("cannot marshal JSON: err=%w", err)
+	}
+	runner.Events <- json.RawMessage(data)
 	return nil
 }
 
