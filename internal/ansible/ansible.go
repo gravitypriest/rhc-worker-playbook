@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/google/uuid"
 	"github.com/redhatinsights/rhc-worker-playbook/internal/constants"
 	"github.com/rjeczalik/notify"
 	"github.com/subpop/go-log"
@@ -35,10 +34,6 @@ type Runner struct {
 
 	stopJobEventsWatch chan struct{}
 }
-
-// createUuidFunc is a function that returns a UUID, typically uuid.New(),
-// used as a function parameter to decouple uuid generation from function logic
-type createUuidFunc func() uuid.UUID
 
 // NewRunner creates a new Runner, uniquely identified by ID.
 func NewRunner(ID string) *Runner {
@@ -236,47 +231,6 @@ func (r *Runner) watchJobEvents() {
 		case event := <-watchedEvents:
 			r.handleJobEvent(event)
 		}
-	}
-}
-
-// GenerateExecutorOnStartEvent creates a special executor_on_start event
-// to inform Insights that the Ansible job is beginning.
-func GenerateExecutorOnStartEvent(
-	correlationID string,
-	uuidNew createUuidFunc,
-) map[string]any {
-	return map[string]any{
-		"event":      "executor_on_start",
-		"uuid":       uuidNew().String(),
-		"counter":    -1,
-		"stdout":     "",
-		"start_line": 0,
-		"end_line":   0,
-		"event_data": map[string]any{
-			"crc_dispatcher_correlation_id": correlationID,
-		},
-	}
-}
-
-// GenerateExecutorOnFailedEvent creates a special executor_on_failed event
-// to inform Insights that the Ansible job failed to run.
-func GenerateExecutorOnFailedEvent(
-	correlationID string,
-	errorCode string,
-	errorDetails error,
-	uuidNew createUuidFunc,
-) map[string]any {
-	return map[string]any{
-		"event":      "executor_on_failed",
-		"uuid":       uuidNew().String(),
-		"counter":    -1,
-		"start_line": 0,
-		"end_line":   0,
-		"event_data": map[string]any{
-			"crc_dispatcher_correlation_id": correlationID,
-			"crc_dispatcher_error_code":     errorCode,
-			"crc_dispatcher_error_details":  errorDetails.Error(),
-		},
 	}
 }
 

@@ -21,11 +21,16 @@ import (
 	"github.com/subpop/go-log"
 )
 
+// createUuidFunc is a function that returns a UUID, typically uuid.New(),
+// used as a function parameter to decouple uuid generation from function logic
+type createUuidFunc func() uuid.UUID
+
 type EventManager struct {
 	id                string
 	returnURL         string
 	responseInterval  time.Duration
 	worker            *worker.Worker
+	runner            *ansible.Runner
 	cachedEvents      []json.RawMessage
 	cachedEventsLock  sync.RWMutex
 	stopSendingEvents chan struct{}
@@ -36,6 +41,7 @@ func NewEventManager(
 	returnURL string,
 	responseInterval time.Duration,
 	worker *worker.Worker,
+	runner *ansible.Runner,
 ) *EventManager {
 	return &EventManager{
 		id:                id,
@@ -93,12 +99,12 @@ func rx(
 		responseInterval = 500 * time.Millisecond
 	}
 
-	// Create the event manager.
-	eventManager := NewEventManager(id, returnURL, responseInterval, w)
-
 	// Create the playbook runner.
 	runner := ansible.NewRunner(correlationID)
 	defer close(runner.Events)
+
+	// Create the event manager.
+	eventManager := NewEventManager(id, returnURL, responseInterval, w, runner)
 
 	// Start the goroutine processing events from the runner.
 	go eventManager.processEvents(runner)
@@ -106,7 +112,7 @@ func rx(
 
 	// publish an "executor_on_start" event to signal cloud connector that a run
 	// event has started
-	if err := SendExecutorOnStartEvent(correlationID, runner); err != nil {
+	if err := eventManager.sendExecutorOnStartEvent(); err != nil {
 		return err
 	}
 
@@ -115,11 +121,9 @@ func rx(
 		if err != nil {
 			verifyPlaybookError := err
 
-			if err := SendExecutorOnFailedEvent(
-				correlationID,
+			if err := eventManager.sendExecutorOnFailedEvent(
 				"ANSIBLE_PLAYBOOK_SIGNATURE_VALIDATION_FAILED",
 				verifyPlaybookError,
-				runner,
 			); err != nil {
 				return errors.Join(
 					verifyPlaybookError,
@@ -138,11 +142,9 @@ func rx(
 	if err != nil {
 		playbookRunError := fmt.Errorf("cannot run playbook: err=%w", err)
 
-		if err := SendExecutorOnFailedEvent(
-			correlationID,
+		if err := eventManager.sendExecutorOnFailedEvent(
 			"UNDEFINED_ERROR",
 			playbookRunError,
-			runner,
 		); err != nil {
 			return errors.Join(
 				playbookRunError,
@@ -280,28 +282,71 @@ func (e *EventManager) transmitEvents(events []json.RawMessage) error {
 	return nil
 }
 
-func SendExecutorOnStartEvent(correlationID string, runner *ansible.Runner) error {
-	startEvent := ansible.GenerateExecutorOnStartEvent(correlationID, uuid.New)
+// generateExecutorOnStartEvent creates a special executor_on_start event
+// to inform Insights that the Ansible job is beginning.
+func generateExecutorOnStartEvent(
+	correlationID string,
+	uuidNew createUuidFunc,
+) map[string]any {
+	return map[string]any{
+		"event":      "executor_on_start",
+		"uuid":       uuidNew().String(),
+		"counter":    -1,
+		"stdout":     "",
+		"start_line": 0,
+		"end_line":   0,
+		"event_data": map[string]any{
+			"crc_dispatcher_correlation_id": correlationID,
+		},
+	}
+}
+
+// generateExecutorOnFailedEvent creates a special executor_on_failed event
+// to inform Insights that the Ansible job failed to run.
+func generateExecutorOnFailedEvent(
+	correlationID string,
+	errorCode string,
+	errorDetails error,
+	uuidNew createUuidFunc,
+) map[string]any {
+	return map[string]any{
+		"event":      "executor_on_failed",
+		"uuid":       uuidNew().String(),
+		"counter":    -1,
+		"start_line": 0,
+		"end_line":   0,
+		"event_data": map[string]any{
+			"crc_dispatcher_correlation_id": correlationID,
+			"crc_dispatcher_error_code":     errorCode,
+			"crc_dispatcher_error_details":  errorDetails.Error(),
+		},
+	}
+}
+
+// sendExecutorOnStartEvent generates an executor_on_start event and places it on the Events channel
+func (e *EventManager) sendExecutorOnStartEvent() error {
+	startEvent := generateExecutorOnStartEvent(e.runner.ID, uuid.New)
 	startEventJsonString, err := json.Marshal(startEvent)
 	if err != nil {
 		return fmt.Errorf("cannot marshal json: err=%v", err)
 	}
-	runner.Events <- json.RawMessage(startEventJsonString)
+	e.runner.Events <- json.RawMessage(startEventJsonString)
 	return nil
 }
 
-func SendExecutorOnFailedEvent(correlationID string, errorKey string, errorString error, runner *ansible.Runner) error {
-	event := ansible.GenerateExecutorOnFailedEvent(
-		correlationID,
+// sendExecutorOnFailedEvent generates an executor_on_failed event and places it on the Events channel
+func (e *EventManager) sendExecutorOnFailedEvent(errorKey string, errorDetails error) error {
+	event := generateExecutorOnFailedEvent(
+		e.runner.ID,
 		errorKey,
-		errorString,
+		errorDetails,
 		uuid.New)
 
 	data, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("cannot marshal JSON: err=%w", err)
 	}
-	runner.Events <- json.RawMessage(data)
+	e.runner.Events <- json.RawMessage(data)
 	return nil
 }
 
