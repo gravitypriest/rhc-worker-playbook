@@ -48,6 +48,7 @@ func NewEventManager(
 		returnURL:         returnURL,
 		responseInterval:  responseInterval,
 		worker:            worker,
+		runner:            runner,
 		cachedEvents:      []json.RawMessage{},
 		stopSendingEvents: make(chan struct{}),
 	}
