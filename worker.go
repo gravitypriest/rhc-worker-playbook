@@ -107,7 +107,7 @@ func rx(
 	eventManager := NewEventManager(id, returnURL, responseInterval, w, runner)
 
 	// Start the goroutine processing events from the runner.
-	go eventManager.processEvents(runner)
+	go eventManager.processEvents()
 	go eventManager.transmitCachedEvents()
 
 	// publish an "executor_on_start" event to signal cloud connector that a run
@@ -159,8 +159,8 @@ func rx(
 }
 
 // processEvents receives values from the runner and caches them for future use.
-func (e *EventManager) processEvents(runner *ansible.Runner) {
-	for event := range runner.Events {
+func (e *EventManager) processEvents() {
+	for event := range e.runner.Events {
 		e.cachedEventsLock.Lock()
 		e.cachedEvents = append(e.cachedEvents, event)
 		e.cachedEventsLock.Unlock()
