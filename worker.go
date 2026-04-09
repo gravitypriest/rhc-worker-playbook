@@ -5,54 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"mime/multipart"
-	"net/textproto"
 	"os/exec"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/goccy/go-yaml"
-	"github.com/google/uuid"
 	"github.com/redhatinsights/rhc-worker-playbook/internal/ansible"
 	"github.com/redhatinsights/rhc-worker-playbook/internal/config"
 	"github.com/redhatinsights/yggdrasil/worker"
 	"github.com/subpop/go-log"
 )
-
-// createUuidFunc is a function that returns a UUID, typically uuid.New(),
-// used as a function parameter to decouple uuid generation from function logic
-type createUuidFunc func() uuid.UUID
-
-type EventManager struct {
-	id                string
-	returnURL         string
-	responseInterval  time.Duration
-	worker            *worker.Worker
-	runner            *ansible.Runner
-	cachedEvents      []json.RawMessage
-	cachedEventsLock  sync.RWMutex
-	stopSendingEvents chan struct{}
-}
-
-func NewEventManager(
-	id string,
-	returnURL string,
-	responseInterval time.Duration,
-	worker *worker.Worker,
-	runner *ansible.Runner,
-) *EventManager {
-	return &EventManager{
-		id:                id,
-		returnURL:         returnURL,
-		responseInterval:  responseInterval,
-		worker:            worker,
-		runner:            runner,
-		cachedEvents:      []json.RawMessage{},
-		stopSendingEvents: make(chan struct{}),
-	}
-}
 
 func rx(
 	w *worker.Worker,
@@ -71,7 +33,7 @@ func rx(
 	}
 
 	// Get correlationID from metadata
-	correlationID, has := metadata["crc_dispatcher_correlation_id"]
+	correlationId, has := metadata["crc_dispatcher_correlation_id"]
 	if !has {
 		return fmt.Errorf("invalid metadata: missing crc_dispatcher_correlation_id")
 	}
@@ -100,20 +62,22 @@ func rx(
 		responseInterval = 500 * time.Millisecond
 	}
 
-	// Create the playbook runner.
-	runner := ansible.NewRunner(correlationID)
-	defer close(runner.Events)
+	// Create the events channel for communication between the Runner and EventManager routines
+	events := make(chan json.RawMessage)
+	defer close(events)
 
-	// Create the event manager.
-	eventManager := NewEventManager(id, returnURL, responseInterval, w, runner)
+	eventManager := ansible.NewEventManager(id, correlationId, returnURL, responseInterval, w, events)
+
+	// Create the playbook runner.
+	runner := ansible.NewRunner(correlationId, events)
 
 	// Start the goroutine processing events from the runner.
-	go eventManager.processEvents()
-	go eventManager.transmitCachedEvents()
+	go eventManager.ProcessEvents()
+	go eventManager.TransmitCachedEvents()
 
 	// publish an "executor_on_start" event to signal cloud connector that a run
 	// event has started
-	if err := eventManager.sendExecutorOnStartEvent(); err != nil {
+	if err := eventManager.SendExecutorOnStartEvent(); err != nil {
 		return err
 	}
 
@@ -122,7 +86,7 @@ func rx(
 		if err != nil {
 			verifyPlaybookError := err
 
-			if err := eventManager.sendExecutorOnFailedEvent(
+			if err := eventManager.SendExecutorOnFailedEvent(
 				"ANSIBLE_PLAYBOOK_SIGNATURE_VALIDATION_FAILED",
 				verifyPlaybookError,
 			); err != nil {
@@ -143,7 +107,7 @@ func rx(
 	if err != nil {
 		playbookRunError := fmt.Errorf("cannot run playbook: err=%w", err)
 
-		if err := eventManager.sendExecutorOnFailedEvent(
+		if err := eventManager.SendExecutorOnFailedEvent(
 			"UNDEFINED_ERROR",
 			playbookRunError,
 		); err != nil {
@@ -156,197 +120,6 @@ func rx(
 		return playbookRunError
 	}
 
-	return nil
-}
-
-// processEvents receives values from the runner and caches them for future use.
-func (e *EventManager) processEvents() {
-	for event := range e.runner.Events {
-		e.cachedEventsLock.Lock()
-		e.cachedEvents = append(e.cachedEvents, event)
-		e.cachedEventsLock.Unlock()
-	}
-
-	// Signal the sending events goroutine to stop.
-	e.stopSendingEvents <- struct{}{}
-
-	// Transmit one final batch of all events.
-	if err := e.transmitEvents(e.cachedEvents); err != nil {
-		log.Errorf("cannot transmit events: err=%v", err)
-	}
-
-	log.Infof("message finished: message-id=%v", e.id)
-}
-
-// transmitCachedEvents periodically transmits a batch of cached events when the
-// response interval timeout elapses.
-func (e *EventManager) transmitCachedEvents() {
-	timeout := time.Tick(e.responseInterval)
-	batchStart := 0
-	for {
-		select {
-		case <-e.stopSendingEvents:
-			return
-		case <-timeout:
-			var batchEnd int
-
-			e.cachedEventsLock.RLock()
-			if config.DefaultConfig.BatchEvents > 0 {
-				// If batching events, compute the end of the batch, ensuring
-				// the end does not exceed the length of the cached events.
-				batchEnd = batchStart + config.DefaultConfig.BatchEvents
-				if batchEnd > len(e.cachedEvents) {
-					batchEnd = len(e.cachedEvents)
-				}
-			} else {
-				// If not batching events, treat the entire slice as one
-				// "batch".
-				batchStart = 0
-				batchEnd = len(e.cachedEvents)
-			}
-
-			// If the value of the current batch start has caught up to the
-			// known end of the cached events and the timeout has triggered
-			// again, skip this iteration.
-			if batchStart >= batchEnd {
-				e.cachedEventsLock.RUnlock()
-				continue
-			}
-
-			cachedEvents := append([]json.RawMessage{}, e.cachedEvents[batchStart:batchEnd]...)
-			e.cachedEventsLock.RUnlock()
-			log.Debugf(
-				"transmitting cached events: batchStart=%v batchEnd=%v",
-				batchStart,
-				batchEnd,
-			)
-			if err := e.transmitEvents(cachedEvents); err != nil {
-				log.Errorf("cannot transmit events: err=%v", err)
-				continue
-			}
-
-			batchStart = batchEnd
-		}
-	}
-}
-
-// transmitEvents sends a slice of json.RawMessage values as an HTTP multipart
-// request body and sends it via a D-Bus
-// com.redhat.Yggdrasil1.Dispatcher1.Transmit method call.
-func (e *EventManager) transmitEvents(events []json.RawMessage) error {
-	// Build a JSONL data buffer.
-	body := strings.Builder{}
-	for _, event := range events {
-		_, err := body.Write(event)
-		if err != nil {
-			return fmt.Errorf("cannot write to body: err=%w", err)
-		}
-		_ = body.WriteByte('\n')
-	}
-	requestBody, outerContentType, err := buildRequestBody(
-		body.String(),
-		"runner-events",
-	)
-	if err != nil {
-		return fmt.Errorf("cannot build request body: err=%v", err)
-	}
-
-	responseCode, responseMetadata, responseBody, err := e.worker.Transmit(
-		e.returnURL,
-		uuid.New().String(),
-		e.id,
-		map[string]string{
-			"Content-Type": outerContentType,
-		},
-		requestBody.Bytes(),
-	)
-	if err != nil {
-		return fmt.Errorf("cannot transmit data: err=%v", err)
-	}
-	log.Debugf(
-		"received response: code=%v responseMetadata=%v",
-		responseCode,
-		responseMetadata,
-	)
-	log.Tracef("responseBody=%v", string(responseBody))
-
-	if responseCode >= 400 {
-		// return an error if HTTP status code is 400 and up
-		return fmt.Errorf(
-			"server returned error response: code=%v responseMetadata=%v responseBody=%v",
-			responseCode,
-			responseMetadata,
-			string(responseBody),
-		)
-	}
-
-	return nil
-}
-
-// generateExecutorOnStartEvent creates a special executor_on_start event
-// to inform Insights that the Ansible job is beginning.
-func generateExecutorOnStartEvent(
-	correlationID string,
-	uuidNew createUuidFunc,
-) map[string]any {
-	return map[string]any{
-		"event":      "executor_on_start",
-		"uuid":       uuidNew().String(),
-		"counter":    -1,
-		"stdout":     "",
-		"start_line": 0,
-		"end_line":   0,
-		"event_data": map[string]any{
-			"crc_dispatcher_correlation_id": correlationID,
-		},
-	}
-}
-
-// generateExecutorOnFailedEvent creates a special executor_on_failed event
-// to inform Insights that the Ansible job failed to run.
-func generateExecutorOnFailedEvent(
-	correlationID string,
-	errorCode string,
-	errorDetails error,
-	uuidNew createUuidFunc,
-) map[string]any {
-	return map[string]any{
-		"event":      "executor_on_failed",
-		"uuid":       uuidNew().String(),
-		"counter":    -1,
-		"start_line": 0,
-		"end_line":   0,
-		"event_data": map[string]any{
-			"crc_dispatcher_correlation_id": correlationID,
-			"crc_dispatcher_error_code":     errorCode,
-			"crc_dispatcher_error_details":  errorDetails.Error(),
-		},
-	}
-}
-
-// sendExecutorOnStartEvent generates an executor_on_start event and sends it on the Events channel
-func (e *EventManager) sendExecutorOnStartEvent() error {
-	event := generateExecutorOnStartEvent(e.runner.ID, uuid.New)
-	return e.sendExecutorEvent(event)
-}
-
-// sendExecutorOnFailedEvent generates an executor_on_failed event and sends it on the Events channel
-func (e *EventManager) sendExecutorOnFailedEvent(errorKey string, errorDetails error) error {
-	event := generateExecutorOnFailedEvent(
-		e.runner.ID,
-		errorKey,
-		errorDetails,
-		uuid.New)
-	return e.sendExecutorEvent(event)
-}
-
-// sendExecutorEvent marshals an event and sends it on the Events channel
-func (e *EventManager) sendExecutorEvent(event map[string]any) error {
-	data, err := json.Marshal(event)
-	if err != nil {
-		return fmt.Errorf("cannot marshal JSON: err=%w", err)
-	}
-	e.runner.Events <- json.RawMessage(data)
 	return nil
 }
 
@@ -432,40 +205,4 @@ func verifyPlaybook(data []byte) ([]byte, error) {
 	}
 
 	return playbookData, nil
-}
-
-// buildRequestBody assembles a multipart/mixed HTTP request body suitable for
-// uploading to ingress.
-func buildRequestBody(body string, filename string) (*bytes.Buffer, string, error) {
-	requestBody := &bytes.Buffer{}
-	writer := multipart.NewWriter(requestBody)
-	defer func() {
-		closeErr := writer.Close()
-		if closeErr != nil {
-			log.Errorf("cannot close request body writer: %v", closeErr)
-		}
-	}()
-
-	// Set the inner content-type accordingly, as required by ingress.
-	// https://github.com/RedHatInsights/insights-ingress-go/blob/ada891f3dff3f402e4c03ef8aa3a34908cc0a4dc/README.md?plain=1#L46
-	innerContentType := "application/vnd.redhat.playbook.v1+jsonl"
-	contentDisposition := fmt.Sprintf(`form-data; name="file"; filename="%s"`, filename)
-
-	h := make(textproto.MIMEHeader)
-	h.Set("Content-Disposition", contentDisposition)
-	h.Set("Content-Type", innerContentType)
-
-	part, err := writer.CreatePart(h)
-	if err != nil {
-		return nil, "", fmt.Errorf("cannot create form part: %v", err)
-	}
-
-	_, err = io.WriteString(part, body)
-	if err != nil {
-		return nil, "", fmt.Errorf("cannot write body to form part: %v", err)
-	}
-
-	outerContentType := fmt.Sprintf("multipart/form-data; boundary=%s", writer.Boundary())
-
-	return requestBody, outerContentType, nil
 }

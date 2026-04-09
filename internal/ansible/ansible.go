@@ -20,9 +20,9 @@ type Runner struct {
 	// metadata.
 	ID string
 
-	// Events contain runner events, marshaled as raw JSON. Receive values from
+	// events contain runner events, marshaled as raw JSON. Receive values from
 	// this channel to receive the current state of the run.
-	Events chan json.RawMessage
+	events chan json.RawMessage
 
 	// Status is the final status of the run. It will be empty if the job has
 	// not completed.
@@ -36,9 +36,9 @@ type Runner struct {
 }
 
 // NewRunner creates a new Runner, uniquely identified by ID.
-func NewRunner(ID string) *Runner {
+func NewRunner(ID string, events chan json.RawMessage) *Runner {
 	return &Runner{
-		Events:             make(chan json.RawMessage),
+		events:             events,
 		ID:                 ID,
 		playbookPath:       filepath.Join(constants.StateDir, ID+".yaml"),
 		jobEventsPath:      filepath.Join(constants.PrivateDataDir, "artifacts", ID, "job_events"),
@@ -184,7 +184,7 @@ func (r *Runner) handleJobEvent(event notify.EventInfo) {
 			filteredModifiedData = modifiedData
 		}
 
-		r.Events <- filteredModifiedData
+		r.events <- filteredModifiedData
 		log.Debugf("event sent: event=%v", prettyJson(filteredModifiedData))
 	}
 }
