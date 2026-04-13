@@ -35,6 +35,9 @@ var (
 
 	// AnsibleRemoteTmpPath is a directory used by ansible-runner
 	AnsibleRemoteTmpPath string
+	// PlaybookInProgressMarker is a path to a marker file that is created to communicate a playbook execution in progress,
+	// and deleted when a playbook is no longer in progress.
+	PlaybookInProgressMarker string
 )
 
 func init() {
@@ -81,4 +84,5 @@ func init() {
 	if AnsibleRemoteTmpPath == "" {
 		AnsibleRemoteTmpPath = filepath.Join(AnsibleHomePath, "remote-tmp")
 	}
+	PlaybookInProgressMarker = filepath.Join(StateDir, ".playbook-in-progress")
 }
