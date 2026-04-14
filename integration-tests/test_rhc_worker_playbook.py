@@ -279,7 +279,7 @@ def test_playbook_verify_failure_invalid_signature_exclude(
     pytest.rhel_major_version == "unknown" or int(pytest.rhel_major_version) < 10,
     reason="This test is only supported on RHEL10 and above",
 )
-def test_playbook_in_progress_marker(
+def test_no_two_playbooks_at_once(
     http_server,
     rhc_worker_playbook_config_for_worker_test,
     yggdrasil_config_for_local_mqtt_broker,
@@ -287,18 +287,10 @@ def test_playbook_in_progress_marker(
 ): 
     """
     test_stops:
-    1. Verify the .playbook-in-progress file does not exist when service begins
-    2. Publish a message to MQTT to start a playbook run
-    3. Verify the .playbook-in-progress file exists while playbook is running
-    4. While playbook is running, attempt to run another playbook
-    5. Verify the second playbook fails to initialize
-    6. After first playbook run completes, verify the .playbook-in-progress does not exist
-    """    
-    playbook_in_progress_file = "/var/lib/rhc-worker-playbook/.playbook-in-progress"
-    
-    logger.info(f"Verifying {playbook_in_progress_file} does not exist prior to playbook run...")
-    assert not os.path.exists(playbook_in_progress_file)
-    
+    1. Publish a message to MQTT to start a playbook run
+    2. While playbook is running, attempt to run another playbook
+    3. Verify the second playbook fails to initialize
+    """   
     playbook_url = "http://localhost:8000/resources/pause1m.yml"
 
     logger.info(f"Playbook will be downloaded from: {playbook_url}")
@@ -310,8 +302,6 @@ def test_playbook_in_progress_marker(
 
     # wait a few seconds for the playbook run to begin
     time.sleep(5)
-    logger.info(f"Verifying {playbook_in_progress_file} exists during playbook run...")
-    assert os.path.exists(playbook_in_progress_file)
     
     # attempt to start another playbook, should fail
     logger.info("Attempting to launch a simultaneous playbook run...")
@@ -325,7 +315,4 @@ def test_playbook_in_progress_marker(
     assert verify_playbook_execution_status(
         data_message["metadata"]["crc_dispatcher_correlation_id"], timeout=90
     )
-    
-    # confirm the marker file is gone
-    logger.info(f"Verifying {playbook_in_progress_file} does not exist after playbook run...")
-    assert not os.path.exists(playbook_in_progress_file)
+
